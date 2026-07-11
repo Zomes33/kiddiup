@@ -200,13 +200,12 @@ const blogPosts = [
 ];
 
 const events = [
-  { badge: "4–19 Jul 2026", title: "You & Me and The Land of Lost Things", venue: "Playhouse, Sydney Opera House", desc: "A brand-new stage show from the creators of the Treehouse series — Andy Griffiths & Bill Hope's bonkers book comes to life. Ages 6+. From $39.90.", url: "https://www.sydneyoperahouse.com/kids-families" },
-  { badge: "4–11 Jul 2026", title: "Flying Fruit Fly Circus", venue: "Studio, Sydney Opera House", desc: "Thirteen young acrobats mix circus skills, comedy and sleight of hand in a high-energy show. Ages 6+. From $29.90.", url: "https://www.sydneyoperahouse.com/kids-families" },
-  { badge: "10–19 Jul 2026", title: "Christmas in July Festival", venue: "The Rocks, Sydney CBD", desc: "Free entry. European-style winter market with snowfalls, fairy lights, live jazz sessions and roving performers. Perfect family day out.", url: "https://www.therocks.com" },
-  { badge: "6 Jun – 10 Jul 2026", title: "Children's International Film Festival", venue: "Ritz Cinemas, Randwick", desc: "30 brilliant kids' films from around the world including Toy Story 5. Ages 3–12, with age guides for every film.", url: "https://chiff.com.au" },
+  { badge: "4–19 Jul 2026", title: "You & Me and The Land of Lost Things", venue: "Playhouse, Sydney Opera House", desc: "A brand-new stage show from the creators of the Treehouse series — Andy Griffiths & Bill Hope's bonkers book comes to life. Ages 6+. From $39.90.", url: "https://www.sydneyoperahouse.com/kids-families", img: "/images/you-and-me.jpg" },
+  { badge: "4–11 Jul 2026", title: "Flying Fruit Fly Circus", venue: "Studio, Sydney Opera House", desc: "Thirteen young acrobats mix circus skills, comedy and sleight of hand in a high-energy show. Ages 6+. From $29.90.", url: "https://www.sydneyoperahouse.com/kids-families", img: "/images/flying-fruit-fly-circus.webp" },
+  { badge: "10–19 Jul 2026", title: "Christmas in July Festival", venue: "The Rocks, Sydney CBD", desc: "Free entry. European-style winter market with snowfalls, fairy lights, live jazz sessions and roving performers. Perfect family day out.", url: "https://www.therocks.com", img: "/images/christmas-in-july.webp" },
   { badge: "5–12 Jul 2026", title: "NAIDOC Week Celebrations", venue: "Across Sydney", desc: "Celebrating Aboriginal and Torres Strait Islander culture. Djaadjawan Dancers perform at the Australian Maritime Museum. Many events free.", url: "https://www.naidoc.org.au" },
   { badge: "10–18 Jul 2026", title: "Art Gallery Family Festival", venue: "Art Gallery NSW, Sydney CBD", desc: "Free fun-filled festival for kids and families across 11–12 July. Drop-in workshops, roving art-making tours and interactive installations. Free entry.", url: "https://www.artgallery.nsw.gov.au" },
-  { badge: "Daily", title: "Digipark — Immersive Entertainment", venue: "Westfield Sydney, Level 5", desc: "VR worlds, 9D cinemas and holographic tunnel. Fun for all ages in the heart of the CBD.", url: "https://www.digipark.com.au" },
+  { badge: "Daily", title: "Digipark — Immersive Entertainment", venue: "Westfield Sydney, Level 5", desc: "VR worlds, 9D cinemas and holographic tunnel. Fun for all ages in the heart of the CBD.", url: "https://www.digipark.com.au", img: "/images/digipark.jpg" },
   { badge: "Until Aug 2026", title: "Bondi Festival 2026", venue: "Bondi Beach precinct", desc: "17-day winter festival marking Bondi's milestone postcode year 2026. Comedy Gala, beachside Ice Rink, Ferris Wheel and free Paw Patrol events.", url: "https://bondifestival.com.au" },
 ];
 
@@ -474,12 +473,15 @@ export default function KiddiUp() {
   };
 
   const EventCard = ({ e }) => (
-    <div style={{ background: "#fff", borderRadius: 13, padding: "1.1rem", border: "1px solid #E8E6E1" }}>
-      <span style={{ display: "inline-block", fontSize: "0.72rem", padding: "0.25rem 0.7rem", borderRadius: 999, background: "#F0EBF8", color: "#7B5EA7", fontWeight: 500, marginBottom: "0.65rem" }}>{e.badge}</span>
-      <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#111", marginBottom: "0.25rem" }}>{e.title}</div>
-      <div style={{ fontSize: "0.78rem", color: "#666", marginBottom: "0.4rem" }}>{e.venue}</div>
-      <div style={{ fontSize: "0.78rem", color: "#555", lineHeight: 1.5, marginBottom: "0.65rem" }}>{e.desc}</div>
-      {e.url && <a href={e.url} target="_blank" rel="noreferrer" style={{ fontSize: "0.78rem", color: "#7B5EA7", fontWeight: 500 }}>More info →</a>}
+    <div style={{ background: "#fff", borderRadius: 13, overflow: "hidden", border: "1px solid #E8E6E1" }}>
+      {e.img && <div style={{ height: 140, overflow: "hidden" }}><img src={e.img} alt={e.title} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /></div>}
+      <div style={{ padding: "1.1rem" }}>
+        <span style={{ display: "inline-block", fontSize: "0.72rem", padding: "0.25rem 0.7rem", borderRadius: 999, background: "#F0EBF8", color: "#7B5EA7", fontWeight: 500, marginBottom: "0.65rem" }}>{e.badge}</span>
+        <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#111", marginBottom: "0.25rem" }}>{e.title}</div>
+        <div style={{ fontSize: "0.78rem", color: "#666", marginBottom: "0.4rem" }}>{e.venue}</div>
+        <div style={{ fontSize: "0.78rem", color: "#555", lineHeight: 1.5, marginBottom: "0.65rem" }}>{e.desc}</div>
+        {e.url && <a href={e.url} target="_blank" rel="noreferrer" style={{ fontSize: "0.78rem", color: "#7B5EA7", fontWeight: 500 }}>More info →</a>}
+      </div>
     </div>
   );
 
