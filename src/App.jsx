@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Analytics } from "@vercel/analytics/react";
 
 const WebIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -755,6 +756,7 @@ export default function KiddiUp() {
           </span>
         </div>
       </footer>
+      <Analytics />
     </div>
   );
 }
