@@ -110,7 +110,7 @@ const activities = [
   { title: "School of Rock Sydney", suburb: "Newtown", cat: "Music", age: "5-18", price: "$$", rating: 4.8, reviews: 74, desc: "One-on-one lessons plus band rehearsals and live gigs.", badge: "badge-music", web: "https://www.schoolofrock.com/locations/sydney", instagram: "https://www.instagram.com/schoolofrocksydney/", facebook: "https://www.facebook.com/schoolofrocksydney/" },
   { title: "Musica Viva Little Stars", suburb: "CBD", cat: "Music", age: "3-6", price: "$$", rating: 4.7, reviews: 38, desc: "Early childhood music through play and song.", badge: "badge-music", web: "https://www.musicaviva.com.au/education/early-learning/", instagram: "https://www.instagram.com/musicaviva/" },
   { title: "Forte School of Music", suburb: "Various (Sydney-wide)", cat: "Music", age: "3-18", price: "$$", rating: 4.7, reviews: 88, desc: "Australia's largest music school network. Piano, guitar, violin, voice.", badge: "badge-music", web: "https://www.fortemusic.com.au", instagram: "https://www.instagram.com/forteschoolofmusic/", facebook: "https://www.facebook.com/ForteSchoolOfMusic/" },
-  { title: "Sydney Conservatorium Junior Program", suburb: "Sydney CBD", cat: "Music", age: "3-18", price: "$$$", rating: 4.9, reviews: 66, desc: "Junior music at Australia's most prestigious conservatorium.", badge: "badge-music", web: "https://openacademy.sydney.edu.au/courses/Programs/Rising+Stars", instagram: "https://www.instagram.com/sydneyconservatorium/", facebook: "https://www.facebook.com/sydneyconservatorium/" },
+  { title: "Sydney Conservatorium Junior Program", suburb: "Sydney CBD", cat: "Music", age: "3-18", price: "$$$", rating: 4.9, reviews: 66, desc: "Junior music at Australia's most prestigious conservatorium.", badge: "badge-music", web: "https://www.sydney.edu.au/music/study/junior-conservatorium.html", instagram: "https://www.instagram.com/sydneyconservatorium/", facebook: "https://www.facebook.com/sydneyconservatorium/" },
   { title: "Australian Institute of Music Junior", suburb: "Sydney CBD", cat: "Music", age: "6-18", price: "$$$", rating: 4.8, reviews: 44, desc: "Junior programs at Australia's leading contemporary music college.", badge: "badge-music", web: "https://www.aim.edu.au", instagram: "https://www.instagram.com/aimusicaus/", facebook: "https://www.facebook.com/AIMAustralia/" },
   { title: "Drumtek School of Drumming", suburb: "Waterloo", cat: "Music", age: "5-18", price: "$$", rating: 4.8, reviews: 33, desc: "Sydney's dedicated drum school. Private and group classes for all styles.", badge: "badge-music", web: "https://www.drumtek.com.au/lessons", instagram: "https://www.instagram.com/drumteksydney/", facebook: "https://www.facebook.com/drumteksydney/" },
   { title: "Randwick Music Centre", suburb: "Randwick", cat: "Music", age: "4-18", price: "$$", rating: 4.7, reviews: 29, desc: "Piano, guitar, violin, flute and theory. AMEB exam preparation.", badge: "badge-music", web: "https://www.randwickmusiccentre.com.au", instagram: "https://www.instagram.com/randwickmusiccentre/", facebook: "https://www.facebook.com/randwickmusiccentre/" },
@@ -222,7 +222,7 @@ const holidays = [
   { badge: "Throughout Jul", title: "Headspace Bondi Junction — Free Youth Groups", venue: "Headspace, Bondi Junction", desc: "Free social and creative groups for young people aged 12–25. Craftspace Art Group (weekly drop-in), New Dimensions Social Club for neurodiverse young people (monthly), and Pickleball Tournament on 6 July in partnership with Rally 4 Ever. Attend with a friend or independently. Ph: 9366 8800.", url: "https://headspace.org.au/headspace-centres/bondi-junction/" },
   { badge: "Every Saturday 7am", title: "Centennial Park Parkrun", venue: "Centennial Park", desc: "Free 5km walk, jog or run every Saturday morning. All paces welcome including walking. A simple, social way to start the weekend — no registration needed on the day.", url: "https://www.parkrun.com.au/centennial/" },
   { badge: "3–19 Jul 2026", title: "Bondi Festival", venue: "Bondi area", desc: "Community festival with live music, art installations, comedy, workshops and food stalls across the Bondi area. A great way to engage with creativity and local community throughout the holidays.", url: "https://www.bondifestival.com.au/event/" },
-  { badge: "Throughout Jul", title: "Crockd Pottery Studio — Kids Holiday Workshops", venue: "Multiple Sydney locations", desc: "Hands-on pottery and paint-your-own-pottery sessions for kids. No experience needed — just creativity and a love of getting your hands dirty. Book online, perfect for ages 5+.", url: "https://studios.crockd.com" },
+  { badge: "Throughout Jul", title: "Creative Workshops — Magnolia Studio & WWAS", venue: "Darlinghurst & Waverley", desc: "Magnolia Studio (Darlinghurst) runs ceramics, charcoal and painting workshops. Waverley Woollahra Art School offers holiday programs in drawing, painting and mixed media.", url: "https://magnoliastudio.au/workshops/" },
   { badge: "Throughout Jul", title: "Woollahra Libraries School Holiday Program", venue: "Woollahra local libraries", desc: "Free activities across local libraries including robotics and STEM workshops, drawing, writing and creative arts, gaming, trivia, group activities and craft sessions. No booking required at most sessions.", url: "https://www.woollahra.nsw.gov.au/Library/Whats-on/School-Holidays" },
 ];
 
@@ -429,31 +429,13 @@ export default function KiddiUp() {
   const livePosts = blogPosts.filter(p => p.live);
   const filteredBlog = blogCat === "all" ? livePosts : livePosts.filter(p => p.cat === blogCat);
 
-  const tabColors = {
-    "whats-on":        { tint: "#FAE4DA", border: "#F0997B", text: "#993C1D", ring: "#D85A30" },
-    "school-holidays": { tint: "#FDF0D4", border: "#FAC775", text: "#854F0B", ring: "#BA7517" },
-    "extra-curricular":{ tint: "#D4F2E8", border: "#5DCAA5", text: "#0F6E56", ring: "#1D9E75" },
-    "buddy-board":     { tint: "#F0EBF8", border: "#C4B8F0", text: "#534AB7", ring: "#7F77DD" },
-    "eduvibe":         { tint: "#EEEDFE", border: "#7F77DD", text: "#3C3489", ring: "#534AB7" },
-    "resources":       { tint: "#DCE9F8", border: "#85B7EB", text: "#0C447C", ring: "#185FA5" },
-  };
-
-  const navBtn = (id, label) => {
-    const active = tab === id;
-    const c = tabColors[id] || { tint: "#F2F0EB", border: "#D6D4CF", text: "#333", ring: "#888" };
-    return (
-      <button key={id} onClick={() => setTab(id)} style={{
-        padding: "0.4rem 0.9rem",
-        border: `1px solid ${c.border}`,
-        borderRadius: 999, fontSize: "0.8rem", fontWeight: active ? 600 : 500,
-        background: c.tint,
-        color: c.text,
-        cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-        outline: active ? `3px solid ${c.ring}` : "none",
-        outlineOffset: "2px",
-      }}>{label}</button>
-    );
-  };
+  const navBtn = (id, label) => (
+    <button key={id} onClick={() => setTab(id)} style={{
+      padding: "0.4rem 0.9rem", border: `1px solid ${tab === id ? "#333" : "#D6D4CF"}`,
+      borderRadius: 999, fontSize: "0.8rem", fontWeight: tab === id ? 600 : 500,
+      background: "#fff", color: tab === id ? "#111" : "#333", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0
+    }}>{label}</button>
+  );
 
   const blogCatBtn = (id, label) => (
     <button key={id} onClick={() => setBlogCat(id)} style={{
@@ -516,7 +498,7 @@ export default function KiddiUp() {
     <div style={{ background: "#F2F0EB", minHeight: "100vh", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
       <nav style={{ background: "#fff", borderBottom: "1px solid #E5E3DE", padding: "0 1rem", display: "flex", alignItems: "center", gap: "0.6rem", height: 56, position: "sticky", top: 0, zIndex: 100 }}>
         <span style={{ fontSize: "1.3rem", fontWeight: 700, letterSpacing: "-0.5px", flexShrink: 0, background: "linear-gradient(90deg,#7B5EA7,#D4874E)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>KiddiUp</span>
-        <div style={{ display: "flex", gap: "0.35rem", overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", flex: 1, padding: "4px 2px" }}>
+        <div style={{ display: "flex", gap: "0.35rem", overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", flex: 1 }}>
           {navBtn("whats-on", "What's On")}
           {navBtn("school-holidays", "School Holidays")}
           {navBtn("extra-curricular", "Extra-Curricular")}
