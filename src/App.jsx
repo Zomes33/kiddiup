@@ -769,9 +769,24 @@ export default function KiddiUp() {
           <a href="mailto:zomes333@gmail.com" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", fontSize: "0.8rem", color: "#7B5EA7", textDecoration: "none", fontWeight: 500 }}>
             📧 Contact us
           </a>
-          <span title="Instagram — coming soon" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", fontSize: "0.8rem", color: "#bbb", fontWeight: 500, cursor: "default" }}>
-            📷 Instagram (coming soon)
-          </span>
+          <a href="https://www.instagram.com/kiddiup_eduvibe/" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", fontSize: "0.8rem", color: "#7B5EA7", textDecoration: "none", fontWeight: 500 }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24">
+              <defs>
+                <radialGradient id="ig-grad" cx="30%" cy="107%" r="150%">
+                  <stop offset="0%" stopColor="#ffd600"/>
+                  <stop offset="25%" stopColor="#ff6a00"/>
+                  <stop offset="50%" stopColor="#ee0979"/>
+                  <stop offset="75%" stopColor="#c92bb7"/>
+                  <stop offset="100%" stopColor="#4f5bd5"/>
+                </radialGradient>
+              </defs>
+              <rect x="1" y="1" width="22" height="22" rx="6" ry="6" fill="url(#ig-grad)"/>
+              <rect x="1" y="1" width="22" height="22" rx="6" ry="6" fill="none" stroke="none"/>
+              <circle cx="12" cy="12" r="5" fill="none" stroke="white" strokeWidth="2"/>
+              <circle cx="17.5" cy="6.5" r="1.2" fill="white"/>
+            </svg>
+            @kiddiup_eduvibe
+          </a>
         </div>
       </footer>
       <Analytics />
