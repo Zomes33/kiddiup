@@ -42,6 +42,33 @@ function fmtWeekRange(d) {
 function fmtMonthLabel(d) {
   return d.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
 }
+
+// ---------- Persistence (localStorage) ----------
+const STORAGE_KEYS = {
+  bigTasks: 'bloom.bigTasks',
+  tasksByDate: 'bloom.tasksByDate',
+  idCounter: 'bloom.idCounter',
+  bgIndex: 'bloom.bgIndex',
+  recurringTasks: 'bloom.recurringTasks',
+  recurringCompletions: 'bloom.recurringCompletions',
+  recurringSkips: 'bloom.recurringSkips',
+  recurringIdCounter: 'bloom.recurringIdCounter',
+};
+
+function loadStored(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function saveStored(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) { /* storage unavailable or full */ }
+}
 function daysUntil(dueDateStr) {
   if (!dueDateStr) return null;
   const [y, m, d] = dueDateStr.split('-').map(Number);
@@ -55,19 +82,42 @@ function fmtDue(dueDateStr) {
   return new Date(y, m - 1, d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
+// ---------- Recurrence ----------
+function parseDateKey(dk) {
+  const [y, m, d] = dk.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+function occursOn(template, date) {
+  const dk = dateKey(date);
+  if (dk < template.startDate) return false;
+  if (template.frequency === 'weekly' || template.frequency === 'fortnightly') {
+    if (date.getDay() !== template.weekday) return false;
+    const start = parseDateKey(template.startDate);
+    const diffDays = Math.round((date - start) / 86400000);
+    if (diffDays < 0) return false;
+    if (template.frequency === 'fortnightly') return (diffDays / 7) % 2 === 0;
+    return true;
+  }
+  if (template.frequency === 'monthly') {
+    return date.getDate() === template.monthDay;
+  }
+  return false;
+}
+const FREQUENCY_LABELS = { weekly: 'weekly', fortnightly: 'fortnightly', monthly: 'monthly' };
+
 export default function Bloom() {
-  const [bgIndex, setBgIndex] = useState(0);
+  const [bgIndex, setBgIndex] = useState(() => loadStored(STORAGE_KEYS.bgIndex, 0));
   const [viewMode, setViewMode] = useState('day'); // 'day' | 'week' | 'month'
   const [anchorDate, setAnchorDate] = useState(new Date());
 
-  const [bigTasks, setBigTasks] = useState([
+  const [bigTasks, setBigTasks] = useState(() => loadStored(STORAGE_KEYS.bigTasks, [
     { id: 'bt1', name: 'Client project', emoji: '💼', dueDate: dateKey(addDays(new Date(), 9)) },
     { id: 'bt2', name: 'Health & movement', emoji: '🏃', dueDate: null },
     { id: 'bt3', name: 'Admin & errands', emoji: '🗂️', dueDate: null },
-  ]);
+  ]));
 
   // tasksByDate: { 'YYYY-MM-DD': { 8: {text, done, bigTaskId} | null, ... } }
-  const [tasksByDate, setTasksByDate] = useState({});
+  const [tasksByDate, setTasksByDate] = useState(() => loadStored(STORAGE_KEYS.tasksByDate, {}));
 
   const [openEmojiMenuFor, setOpenEmojiMenuFor] = useState(null);
   const [openDueMenuFor, setOpenDueMenuFor] = useState(null);
@@ -81,14 +131,43 @@ export default function Bloom() {
   const [openSlotForm, setOpenSlotForm] = useState(null); // { dateKey, hour } | null
   const [draftText, setDraftText] = useState('');
   const [draftTag, setDraftTag] = useState('');
-  const [idCounter, setIdCounter] = useState(4);
+  const [idCounter, setIdCounter] = useState(() => loadStored(STORAGE_KEYS.idCounter, 4));
+
+  const [recurringTasks, setRecurringTasks] = useState(() => loadStored(STORAGE_KEYS.recurringTasks, []));
+  const [recurringCompletions, setRecurringCompletions] = useState(() => loadStored(STORAGE_KEYS.recurringCompletions, {}));
+  const [recurringSkips, setRecurringSkips] = useState(() => loadStored(STORAGE_KEYS.recurringSkips, {}));
+  const [recurringIdCounter, setRecurringIdCounter] = useState(() => loadStored(STORAGE_KEYS.recurringIdCounter, 1));
+  const [draftRepeat, setDraftRepeat] = useState('none'); // 'none' | 'weekly' | 'fortnightly' | 'monthly'
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const theme = BG_OPTIONS[bgIndex];
   const today = new Date();
 
+  useEffect(() => { saveStored(STORAGE_KEYS.bigTasks, bigTasks); }, [bigTasks]);
+  useEffect(() => { saveStored(STORAGE_KEYS.tasksByDate, tasksByDate); }, [tasksByDate]);
+  useEffect(() => { saveStored(STORAGE_KEYS.idCounter, idCounter); }, [idCounter]);
+  useEffect(() => { saveStored(STORAGE_KEYS.bgIndex, bgIndex); }, [bgIndex]);
+  useEffect(() => { saveStored(STORAGE_KEYS.recurringTasks, recurringTasks); }, [recurringTasks]);
+  useEffect(() => { saveStored(STORAGE_KEYS.recurringCompletions, recurringCompletions); }, [recurringCompletions]);
+  useEffect(() => { saveStored(STORAGE_KEYS.recurringSkips, recurringSkips); }, [recurringSkips]);
+  useEffect(() => { saveStored(STORAGE_KEYS.recurringIdCounter, recurringIdCounter); }, [recurringIdCounter]);
+
   const bigTaskById = (id) => bigTasks.find((t) => t.id === id);
 
-  const getSlot = (dk, hour) => (tasksByDate[dk] && tasksByDate[dk][hour]) || null;
+  const getSlot = (dk, hour) => {
+    const override = tasksByDate[dk] && tasksByDate[dk][hour];
+    if (override) return { ...override, recurring: false };
+    const dateObj = parseDateKey(dk);
+    for (const t of recurringTasks) {
+      if (t.hour !== hour) continue;
+      if (!occursOn(t, dateObj)) continue;
+      const key = `${t.id}::${dk}`;
+      if (recurringSkips[key]) continue;
+      return { text: t.text, bigTaskId: t.bigTaskId, done: !!recurringCompletions[key], recurring: true, templateId: t.id, frequency: t.frequency };
+    }
+    return null;
+  };
 
   const setSlot = (dk, hour, data) => {
     setTasksByDate((prev) => ({
@@ -116,23 +195,96 @@ export default function Bloom() {
     const existing = getSlot(dk, hour);
     setDraftText(existing ? existing.text : '');
     setDraftTag(existing && existing.bigTaskId ? existing.bigTaskId : '');
+    setDraftRepeat('none');
     setOpenSlotForm({ dateKey: dk, hour });
   };
 
   const saveSlot = (dk, hour) => {
     const val = draftText.trim();
     const existing = getSlot(dk, hour);
-    setSlot(dk, hour, val ? { text: val, done: existing ? existing.done : false, bigTaskId: draftTag || null } : null);
+
+    if (!val) {
+      deleteSlot(dk, hour);
+      setOpenSlotForm(null);
+      return;
+    }
+
+    if (existing && existing.recurring) {
+      // editing an occurrence of an existing series only overrides this one date
+      setSlot(dk, hour, { text: val, done: existing.done, bigTaskId: draftTag || null });
+      setOpenSlotForm(null);
+      return;
+    }
+
+    if (draftRepeat !== 'none') {
+      const dateObj = parseDateKey(dk);
+      const newId = 'rt' + recurringIdCounter;
+      setRecurringIdCounter((c) => c + 1);
+      setRecurringTasks((prev) => [...prev, {
+        id: newId,
+        hour,
+        text: val,
+        bigTaskId: draftTag || null,
+        frequency: draftRepeat,
+        startDate: dk,
+        weekday: dateObj.getDay(),
+        monthDay: dateObj.getDate(),
+      }]);
+      setSlot(dk, hour, null); // clear any one-off so the new recurring instance shows through
+      setOpenSlotForm(null);
+      return;
+    }
+
+    setSlot(dk, hour, { text: val, done: existing ? existing.done : false, bigTaskId: draftTag || null });
     setOpenSlotForm(null);
   };
 
   const toggleDone = (dk, hour) => {
-    const existing = getSlot(dk, hour);
-    if (!existing) return;
-    setSlot(dk, hour, { ...existing, done: !existing.done });
+    const effective = getSlot(dk, hour);
+    if (!effective) return;
+    if (effective.recurring) {
+      const key = `${effective.templateId}::${dk}`;
+      setRecurringCompletions((prev) => ({ ...prev, [key]: !prev[key] }));
+    } else {
+      setSlot(dk, hour, { ...effective, done: !effective.done });
+    }
   };
 
-  const deleteSlot = (dk, hour) => setSlot(dk, hour, null);
+  const deleteSlot = (dk, hour) => {
+    const effective = getSlot(dk, hour);
+    if (!effective) return;
+    if (effective.recurring) {
+      const key = `${effective.templateId}::${dk}`;
+      setRecurringSkips((prev) => ({ ...prev, [key]: true }));
+      showUndoToast(effective.text, () => {
+        setRecurringSkips((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      });
+    } else {
+      setSlot(dk, hour, null);
+      showUndoToast(effective.text, () => {
+        setSlot(dk, hour, effective);
+      });
+    }
+  };
+
+  const stopRepeating = (templateId) => {
+    setRecurringTasks((prev) => prev.filter((t) => t.id !== templateId));
+    setRecurringCompletions((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((k) => { if (!k.startsWith(templateId + '::')) next[k] = prev[k]; });
+      return next;
+    });
+    setRecurringSkips((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((k) => { if (!k.startsWith(templateId + '::')) next[k] = prev[k]; });
+      return next;
+    });
+    setOpenSlotForm(null);
+  };
 
   // ---------- Big tasks ----------
   const addBigTask = () => {
@@ -156,6 +308,83 @@ export default function Bloom() {
       });
       return next;
     });
+    setRecurringTasks((prev) => prev.map((t) => (t.bigTaskId === id ? { ...t, bigTaskId: null } : t)));
+  };
+
+  // ---------- Drag to reschedule ----------
+  const moveTask = (dk, fromHour, toHour) => {
+    if (fromHour === toHour) return;
+    const source = getSlot(dk, fromHour);
+    if (!source) return;
+    const targetEffective = getSlot(dk, toHour);
+    if (targetEffective) {
+      showToast('That time already has a task');
+      return;
+    }
+    if (source.recurring) {
+      const key = `${source.templateId}::${dk}`;
+      setRecurringSkips((prev) => ({ ...prev, [key]: true }));
+      setSlot(dk, toHour, { text: source.text, done: source.done, bigTaskId: source.bigTaskId });
+    } else {
+      setSlot(dk, toHour, source);
+      setSlot(dk, fromHour, null);
+    }
+  };
+
+  // ---------- Carry over unfinished tasks ----------
+  const carryOverUnfinished = (dk) => {
+    const nextDk = dateKey(addDays(parseDateKey(dk), 1));
+    let moved = 0, skipped = 0;
+    HOURS.forEach((h) => {
+      const slot = getSlot(dk, h);
+      if (!slot || slot.done || slot.recurring) return; // recurring tasks already repeat on their own
+      const nextEffective = getSlot(nextDk, h);
+      if (nextEffective) { skipped++; return; }
+      setSlot(nextDk, h, { text: slot.text, done: false, bigTaskId: slot.bigTaskId });
+      setSlot(dk, h, null);
+      moved++;
+    });
+    if (moved === 0 && skipped === 0) {
+      showToast('Nothing unfinished to carry over');
+    } else if (skipped === 0) {
+      showToast(`Moved ${moved} task${moved === 1 ? '' : 's'} to tomorrow`);
+    } else {
+      showToast(`Moved ${moved}, skipped ${skipped} (tomorrow already busy)`);
+    }
+  };
+
+  // ---------- Streaks ----------
+  const streakForBigTask = (id) => {
+    let best = 0;
+    const todayMid = new Date();
+    todayMid.setHours(0, 0, 0, 0);
+    recurringTasks.filter((t) => t.bigTaskId === id).forEach((t) => {
+      let streak = 0;
+      let cursor = new Date();
+      const start = parseDateKey(t.startDate);
+      while (cursor >= start) {
+        if (occursOn(t, cursor)) {
+          const dk = dateKey(cursor);
+          const key = `${t.id}::${dk}`;
+          if (!recurringSkips[key]) {
+            const curMid = new Date(cursor);
+            curMid.setHours(0, 0, 0, 0);
+            const isToday = curMid.getTime() === todayMid.getTime();
+            const done = !!recurringCompletions[key];
+            if (isToday && !done) {
+              // today's occurrence not done yet — don't count it, don't break the streak either
+            } else if (done) {
+              streak++;
+            } else {
+              break;
+            }
+          }
+        }
+        cursor = addDays(cursor, -1);
+      }
+      if (streak > best) best = streak;
+    });
+    return best;
   };
 
   // ---------- Aggregates for the visible period ----------
@@ -175,15 +404,66 @@ export default function Bloom() {
   const { done, total, pct } = useMemo(() => {
     const filled = [];
     periodDates.forEach((d) => {
-      const slots = tasksByDate[dateKey(d)] || {};
-      Object.values(slots).forEach((s) => s && filled.push(s));
+      const dk = dateKey(d);
+      HOURS.forEach((h) => {
+        const s = getSlot(dk, h);
+        if (s) filled.push(s);
+      });
     });
     const done = filled.filter((s) => s.done).length;
     const total = filled.length;
     return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
-  }, [periodDates, tasksByDate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodDates, tasksByDate, recurringTasks, recurringSkips, recurringCompletions]);
 
   const periodLabel = viewMode === 'day' ? fmtDayHeader(anchorDate) : viewMode === 'week' ? fmtWeekRange(anchorDate) : fmtMonthLabel(anchorDate);
+
+  const weeklyTopProject = useMemo(() => {
+    if (viewMode !== 'week') return null;
+    const tally = {};
+    periodDates.forEach((d) => {
+      const dk = dateKey(d);
+      HOURS.forEach((h) => {
+        const s = getSlot(dk, h);
+        if (s && s.bigTaskId) tally[s.bigTaskId] = (tally[s.bigTaskId] || 0) + 1;
+      });
+    });
+    let topId = null, topCount = 0;
+    Object.entries(tally).forEach(([id, count]) => { if (count > topCount) { topCount = count; topId = id; } });
+    return topId ? { id: topId, count: topCount } : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, periodDates, tasksByDate, recurringTasks, recurringSkips, recurringCompletions]);
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    const results = [];
+    Object.entries(tasksByDate).forEach(([dk, slots]) => {
+      Object.entries(slots).forEach(([hourStr, task]) => {
+        if (task && task.text.toLowerCase().includes(q)) {
+          results.push({ dk, hour: Number(hourStr), text: task.text, bigTaskId: task.bigTaskId, recurring: false });
+        }
+      });
+    });
+    recurringTasks.forEach((t) => {
+      if (!t.text.toLowerCase().includes(q)) return;
+      let cursor = new Date();
+      for (let i = 0; i < 400; i++) {
+        if (occursOn(t, cursor)) {
+          const dk = dateKey(cursor);
+          const key = `${t.id}::${dk}`;
+          const hasOverride = tasksByDate[dk] && tasksByDate[dk][t.hour];
+          if (!recurringSkips[key] && !hasOverride) {
+            results.push({ dk, hour: t.hour, text: t.text, bigTaskId: t.bigTaskId, recurring: true });
+            break;
+          }
+        }
+        cursor = addDays(cursor, 1);
+      }
+    });
+    results.sort((a, b) => (a.dk === b.dk ? a.hour - b.hour : (a.dk < b.dk ? -1 : 1)));
+    return results.slice(0, 20);
+  }, [searchQuery, tasksByDate, recurringTasks, recurringSkips]);
 
   const progressForBigTask = (id) => {
     let total = 0, done = 0;
@@ -191,6 +471,22 @@ export default function Bloom() {
       Object.values(slots).forEach((s) => {
         if (s && s.bigTaskId === id) { total++; if (s.done) done++; }
       });
+    });
+    const todayEnd = new Date();
+    recurringTasks.filter((t) => t.bigTaskId === id).forEach((t) => {
+      let cursor = parseDateKey(t.startDate);
+      while (cursor <= todayEnd) {
+        if (occursOn(t, cursor)) {
+          const dk = dateKey(cursor);
+          const key = `${t.id}::${dk}`;
+          const hasOverride = tasksByDate[dk] && tasksByDate[dk][t.hour];
+          if (!recurringSkips[key] && !hasOverride) {
+            total++;
+            if (recurringCompletions[key]) done++;
+          }
+        }
+        cursor = addDays(cursor, 1);
+      }
     });
     return { total, done, pct: total ? Math.round((done / total) * 100) : 0 };
   };
@@ -209,11 +505,9 @@ export default function Bloom() {
     const stamp = `${now.getUTCFullYear()}${pad2(now.getUTCMonth() + 1)}${pad2(now.getUTCDate())}T${pad2(now.getUTCHours())}${pad2(now.getUTCMinutes())}00Z`;
 
     dateKeysToInclude.forEach((dk) => {
-      const slots = tasksByDate[dk];
-      if (!slots) return;
-      Object.entries(slots).forEach(([hourStr, task]) => {
+      HOURS.forEach((hour) => {
+        const task = getSlot(dk, hour);
         if (!task) return;
-        const hour = Number(hourStr);
         const tag = task.bigTaskId ? bigTaskById(task.bigTaskId) : null;
         const summary = tag ? `${tag.emoji} ${task.text}` : task.text;
         lines.push(
@@ -252,7 +546,13 @@ export default function Bloom() {
     setSettingsOpen(false);
   };
   const exportEverything = () => {
-    downloadICS(Object.keys(tasksByDate), 'bloom-full-export.ics');
+    const keys = new Set(Object.keys(tasksByDate));
+    let cursor = new Date();
+    for (let i = 0; i < 90; i++) {
+      keys.add(dateKey(cursor));
+      cursor = addDays(cursor, 1);
+    }
+    downloadICS(Array.from(keys), 'bloom-full-export.ics');
     setSettingsOpen(false);
   };
 
@@ -290,9 +590,22 @@ export default function Bloom() {
   };
 
   const showToast = (text) => {
-    setToast(text);
+    setToast({ type: 'reminder', label: 'Upcoming', text });
     clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToast(null), 8000);
+  };
+
+  const showUndoToast = (text, onUndo) => {
+    setToast({ type: 'undo', label: 'Deleted', text, actionLabel: 'Undo', onAction: onUndo });
+    clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 6000);
+  };
+
+  const celebratedDateRef = useRef(null);
+  const showCelebration = (text) => {
+    setToast({ type: 'celebrate', label: '🌸 Bloomed', text });
+    clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 7000);
   };
 
   const toggleSound = () => {
@@ -307,7 +620,7 @@ export default function Bloom() {
       const todayKey = dateKey(now);
       const nowMinutes = now.getHours() * 60 + now.getMinutes();
       HOURS.forEach((h) => {
-        const task = tasksByDate[todayKey] && tasksByDate[todayKey][h];
+        const task = getSlot(todayKey, h);
         if (!task || task.done) return;
         const slotMinutes = h * 60;
         const minutesUntil = slotMinutes - nowMinutes;
@@ -323,12 +636,28 @@ export default function Bloom() {
     const id = setInterval(checkReminders, 30000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [soundEnabled, leadMinutes, tasksByDate]);
+  }, [soundEnabled, leadMinutes, tasksByDate, recurringTasks, recurringSkips, recurringCompletions]);
+
+  useEffect(() => {
+    if (viewMode !== 'day' || total === 0 || pct !== 100) return;
+    const dk = dateKey(anchorDate);
+    if (celebratedDateRef.current === dk) return;
+    celebratedDateRef.current = dk;
+    const quotes = [
+      "Every task done. That's a full bloom today.",
+      "All caught up — nice work today.",
+      "100% complete. Well earned.",
+      "Everything ticked off. Enjoy the rest of your day.",
+      "Full clear today — that's worth noticing.",
+    ];
+    showCelebration(quotes[Math.floor(Math.random() * quotes.length)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pct, total, viewMode, anchorDate]);
 
   // ================= RENDER =================
   return (
     <div
-      onClick={() => { if (openEmojiMenuFor) setOpenEmojiMenuFor(null); if (openDueMenuFor) setOpenDueMenuFor(null); if (settingsOpen) setSettingsOpen(false); }}
+      onClick={() => { if (openEmojiMenuFor) setOpenEmojiMenuFor(null); if (openDueMenuFor) setOpenDueMenuFor(null); if (settingsOpen) setSettingsOpen(false); if (searchOpen) setSearchOpen(false); }}
       style={{ background: theme.hex, minHeight: '100vh', fontFamily: "'DM Sans', sans-serif", color: theme.ink, transition: 'background .4s ease' }}
     >
       <style>{`
@@ -376,7 +705,86 @@ export default function Bloom() {
 
             <div style={{ position: 'relative' }}>
               <button
-                onClick={(e) => { e.stopPropagation(); setSettingsOpen((s) => !s); setOpenEmojiMenuFor(null); setOpenDueMenuFor(null); }}
+                onClick={(e) => { e.stopPropagation(); setSearchOpen((s) => !s); setSettingsOpen(false); setOpenEmojiMenuFor(null); setOpenDueMenuFor(null); }}
+                title="Search"
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: '50%',
+                  border: `1px solid ${theme.line}`,
+                  background: theme.paper,
+                  color: theme.ink,
+                  cursor: 'pointer',
+                  fontSize: 15,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                🔍
+              </button>
+
+              {searchOpen && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: 46,
+                    right: 0,
+                    background: theme.paper,
+                    border: `1px solid ${theme.line}`,
+                    borderRadius: 12,
+                    padding: 12,
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.14)',
+                    zIndex: 20,
+                    width: 280,
+                  }}
+                >
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="Search tasks…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ width: '100%', border: `1px solid ${theme.line}`, borderRadius: 8, padding: '8px 10px', fontSize: 13, fontFamily: "'DM Sans', sans-serif", background: theme.hex, color: theme.ink, boxSizing: 'border-box', marginBottom: searchQuery ? 8 : 0 }}
+                  />
+                  {searchQuery && (
+                    <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                      {searchResults.length === 0 && (
+                        <div style={{ fontSize: 12, color: theme.inkSoft, padding: '8px 4px' }}>No matches</div>
+                      )}
+                      {searchResults.map((r, i) => {
+                        const tag = r.bigTaskId ? bigTaskById(r.bigTaskId) : null;
+                        return (
+                          <div
+                            key={i}
+                            onClick={() => { jumpToDay(parseDateKey(r.dk)); setSearchOpen(false); setSearchQuery(''); }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 6px', borderRadius: 8, cursor: 'pointer' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = theme.hex)}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            {tag && <span style={{ fontSize: 14, flexShrink: 0 }}>{tag.emoji}</span>}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12.5, color: theme.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {r.recurring && <span style={{ opacity: 0.6, marginRight: 3 }}>🔁</span>}
+                                {r.text}
+                              </div>
+                              <div style={{ fontSize: 10.5, color: theme.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>
+                                {parseDateKey(r.dk).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} · {fmtHour(r.hour)}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setSettingsOpen((s) => !s); setOpenEmojiMenuFor(null); setOpenDueMenuFor(null); setSearchOpen(false); }}
                 title="Settings"
                 style={{
                   width: 38,
@@ -550,18 +958,61 @@ export default function Bloom() {
               setDraftText={setDraftText}
               draftTag={draftTag}
               setDraftTag={setDraftTag}
+              draftRepeat={draftRepeat}
+              setDraftRepeat={setDraftRepeat}
+              stopRepeating={stopRepeating}
               setOpenSlotForm={setOpenSlotForm}
               bigTasks={bigTasks}
               bigTaskById={bigTaskById}
+              onCarryOver={carryOverUnfinished}
+              moveTask={moveTask}
             />
           )}
 
           {viewMode === 'week' && (
-            <WeekPanel theme={theme} anchorDate={anchorDate} tasksByDate={tasksByDate} bigTaskById={bigTaskById} toggleDone={toggleDone} jumpToDay={jumpToDay} today={today} />
+            <>
+              <WeekPanel theme={theme} anchorDate={anchorDate} getSlot={getSlot} bigTaskById={bigTaskById} toggleDone={toggleDone} jumpToDay={jumpToDay} today={today} />
+
+              <div style={{ background: theme.paper, borderRadius: 14, border: `1px solid ${theme.line}`, padding: '18px 22px' }}>
+                <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 17, fontWeight: 600, margin: '0 0 12px' }}>Weekly review</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: theme.inkSoft, fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Completion</div>
+                    <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600 }}>{pct}%</div>
+                    <div style={{ fontSize: 12, color: theme.inkSoft }}>{done} of {total} tasks done</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: theme.inkSoft, fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Busiest project</div>
+                    {weeklyTopProject ? (
+                      <>
+                        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 18, fontWeight: 600 }}>
+                          {bigTaskById(weeklyTopProject.id)?.emoji} {bigTaskById(weeklyTopProject.id)?.name}
+                        </div>
+                        <div style={{ fontSize: 12, color: theme.inkSoft }}>{weeklyTopProject.count} hour{weeklyTopProject.count === 1 ? '' : 's'} scheduled</div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 13, color: theme.inkSoft }}>Nothing tagged yet</div>
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: theme.inkSoft, fontFamily: "'IBM Plex Mono', monospace", textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Streaks</div>
+                    {bigTasks.filter((bt) => streakForBigTask(bt.id) >= 2).length === 0 ? (
+                      <div style={{ fontSize: 13, color: theme.inkSoft }}>None active yet</div>
+                    ) : (
+                      bigTasks.filter((bt) => streakForBigTask(bt.id) >= 2).map((bt) => (
+                        <div key={bt.id} style={{ fontSize: 12.5, color: theme.ink, marginBottom: 2 }}>
+                          {bt.emoji} {bt.name} — 🔥 {streakForBigTask(bt.id)}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
 
           {viewMode === 'month' && (
-            <MonthPanel theme={theme} anchorDate={anchorDate} tasksByDate={tasksByDate} bigTaskById={bigTaskById} jumpToDay={jumpToDay} today={today} />
+            <MonthPanel theme={theme} anchorDate={anchorDate} getSlot={getSlot} bigTaskById={bigTaskById} jumpToDay={jumpToDay} today={today} />
           )}
 
           {/* Big tasks panel — always visible */}
@@ -584,6 +1035,7 @@ export default function Bloom() {
                   else { dueLabel = `Due ${fmtDue(bt.dueDate)}`; dueColor = theme.inkSoft; }
                 }
                 const barColor = bt.dueDate && days < 0 ? DANGER : theme.accent;
+                const streak = streakForBigTask(bt.id);
 
                 return (
                   <div key={bt.id} className="dp-big-task" style={{ padding: '12px 10px', borderRadius: 10, marginBottom: 6, transition: 'background .15s ease' }}>
@@ -663,6 +1115,12 @@ export default function Bloom() {
                         {progress.done}/{progress.total}
                       </div>
 
+                      {streak >= 2 && (
+                        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: AMBER, whiteSpace: 'nowrap' }} title={`${streak} in a row`}>
+                          🔥 {streak}
+                        </div>
+                      )}
+
                       <div style={{ position: 'relative' }}>
                         <div
                           onClick={(e) => { e.stopPropagation(); setOpenDueMenuFor(openDueMenuFor === bt.id ? null : bt.id); setOpenEmojiMenuFor(null); }}
@@ -722,16 +1180,29 @@ export default function Bloom() {
             right: 24,
             background: theme.paper,
             border: `1px solid ${theme.line}`,
-            borderLeft: `4px solid ${theme.accent}`,
+            borderLeft: `4px solid ${toast.type === 'celebrate' ? AMBER : theme.accent}`,
             borderRadius: 10,
             padding: '12px 16px',
             boxShadow: '0 10px 30px rgba(0,0,0,0.16)',
-            maxWidth: 280,
+            maxWidth: 300,
             zIndex: 50,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
           }}
         >
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: theme.accent, marginBottom: 4 }}>Upcoming</div>
-          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: theme.ink }}>{toast}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: toast.type === 'celebrate' ? AMBER : theme.accent, marginBottom: 4 }}>{toast.label}</div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: theme.ink }}>{toast.text}</div>
+          </div>
+          {toast.actionLabel && (
+            <button
+              onClick={() => { toast.onAction && toast.onAction(); setToast(null); }}
+              style={{ border: 'none', background: theme.accent, color: '#fff', borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}
+            >
+              {toast.actionLabel}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -807,12 +1278,21 @@ function navBtnStyle(theme) {
 }
 
 // ================= DAY VIEW =================
-function DayPanel({ theme, dk, getSlot, openSlotForm, openForm, saveSlot, toggleDone, deleteSlot, draftText, setDraftText, draftTag, setDraftTag, setOpenSlotForm, bigTasks, bigTaskById }) {
+function DayPanel({ theme, dk, getSlot, openSlotForm, openForm, saveSlot, toggleDone, deleteSlot, draftText, setDraftText, draftTag, setDraftTag, draftRepeat, setDraftRepeat, stopRepeating, setOpenSlotForm, bigTasks, bigTaskById, onCarryOver, moveTask }) {
   return (
     <div style={{ background: theme.paper, borderRadius: 14, border: `1px solid ${theme.line}`, overflow: 'hidden' }}>
-      <div style={{ padding: '18px 22px', borderBottom: `1px solid ${theme.line}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ padding: '18px 22px', borderBottom: `1px solid ${theme.line}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 600, margin: 0 }}>Schedule</h2>
-        <span style={{ fontSize: 11, color: theme.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>8:00 — 20:00</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            onClick={() => onCarryOver(dk)}
+            title="Move unfinished tasks to tomorrow"
+            style={{ border: `1px solid ${theme.line}`, background: 'none', color: theme.inkSoft, borderRadius: 8, padding: '5px 10px', fontSize: 11, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}
+          >
+            → Carry over
+          </button>
+          <span style={{ fontSize: 11, color: theme.inkSoft, fontFamily: "'IBM Plex Mono', monospace" }}>8:00 — 20:00</span>
+        </div>
       </div>
 
       <div style={{ padding: '6px 0' }}>
@@ -822,33 +1302,77 @@ function DayPanel({ theme, dk, getSlot, openSlotForm, openForm, saveSlot, toggle
           const isEditing = openSlotForm && openSlotForm.dateKey === dk && openSlotForm.hour === h;
 
           return (
-            <div key={h} style={{ display: 'flex', alignItems: 'stretch', borderBottom: `1px solid ${theme.line}`, minHeight: 56 }}>
+            <div
+              key={h}
+              onDragOver={(e) => { if (!data) e.preventDefault(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const fromHour = Number(e.dataTransfer.getData('text/plain'));
+                if (!Number.isNaN(fromHour)) moveTask(dk, fromHour, h);
+              }}
+              style={{ display: 'flex', alignItems: 'stretch', borderBottom: `1px solid ${theme.line}`, minHeight: 56 }}
+            >
               <div style={{ width: 88, flexShrink: 0, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: theme.inkSoft, padding: '14px 0 0 20px', whiteSpace: 'nowrap' }}>
                 {fmtHour(h)}
               </div>
 
               <div className="dp-slot-body" style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', padding: '8px 18px 8px 14px', gap: 10 }}>
                 {isEditing ? (
-                  <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
-                    <input
-                      className="dp-input"
-                      type="text"
-                      autoFocus
-                      placeholder="What needs doing?"
-                      value={draftText}
-                      onChange={(e) => setDraftText(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') saveSlot(dk, h); if (e.key === 'Escape') setOpenSlotForm(null); }}
-                      style={{ flex: 1, minWidth: 120, border: `1px solid ${theme.line}`, borderRadius: 8, padding: '8px 10px', fontFamily: "'DM Sans', sans-serif", fontSize: 13, background: theme.hex, color: theme.ink }}
-                    />
-                    <select
-                      value={draftTag}
-                      onChange={(e) => setDraftTag(e.target.value)}
-                      style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '7px 8px', fontSize: 12, fontFamily: "'DM Sans', sans-serif", background: theme.hex, color: theme.ink, maxWidth: 140 }}
-                    >
-                      <option value="">No tag</option>
-                      {bigTasks.map((bt) => (<option key={bt.id} value={bt.id}>{bt.emoji} {bt.name}</option>))}
-                    </select>
-                    <button onClick={() => saveSlot(dk, h)} style={{ border: 'none', background: theme.accent, color: '#fff', borderRadius: 8, padding: '8px 12px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>Save</button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        className="dp-input"
+                        type="text"
+                        autoFocus
+                        placeholder="What needs doing?"
+                        value={draftText}
+                        onChange={(e) => setDraftText(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') saveSlot(dk, h); if (e.key === 'Escape') setOpenSlotForm(null); }}
+                        style={{ flex: 1, minWidth: 120, border: `1px solid ${theme.line}`, borderRadius: 8, padding: '8px 10px', fontFamily: "'DM Sans', sans-serif", fontSize: 13, background: theme.hex, color: theme.ink }}
+                      />
+                      <select
+                        value={draftTag}
+                        onChange={(e) => setDraftTag(e.target.value)}
+                        style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '7px 8px', fontSize: 12, fontFamily: "'DM Sans', sans-serif", background: theme.hex, color: theme.ink, maxWidth: 140 }}
+                      >
+                        <option value="">No tag</option>
+                        {bigTasks.map((bt) => (<option key={bt.id} value={bt.id}>{bt.emoji} {bt.name}</option>))}
+                      </select>
+                    </div>
+
+                    {data && data.recurring ? (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11.5, color: theme.inkSoft }}>
+                          🔁 Repeats {FREQUENCY_LABELS[data.frequency]} — editing saves just this date
+                        </span>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            onClick={() => stopRepeating(data.templateId)}
+                            style={{ border: `1px solid ${theme.line}`, background: 'none', color: DANGER, borderRadius: 8, padding: '7px 10px', fontSize: 11.5, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600, whiteSpace: 'nowrap' }}
+                          >
+                            Stop repeating
+                          </button>
+                          <button onClick={() => saveSlot(dk, h)} style={{ border: 'none', background: theme.accent, color: '#fff', borderRadius: 8, padding: '7px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>Save</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 11.5, color: theme.inkSoft }}>Repeat</span>
+                          <select
+                            value={draftRepeat}
+                            onChange={(e) => setDraftRepeat(e.target.value)}
+                            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '6px 8px', fontSize: 11.5, fontFamily: "'DM Sans', sans-serif", background: theme.hex, color: theme.ink }}
+                          >
+                            <option value="none">Doesn't repeat</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="fortnightly">Fortnightly</option>
+                            <option value="monthly">Monthly</option>
+                          </select>
+                        </div>
+                        <button onClick={() => saveSlot(dk, h)} style={{ border: 'none', background: theme.accent, color: '#fff', borderRadius: 8, padding: '7px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>Save</button>
+                      </div>
+                    )}
                   </div>
                 ) : data ? (
                   <>
@@ -861,9 +1385,17 @@ function DayPanel({ theme, dk, getSlot, openSlotForm, openForm, saveSlot, toggle
                     {tag && (
                       <div style={{ fontSize: 15, flexShrink: 0, width: 22, textAlign: 'center' }} title={tag.name}>{tag.emoji}</div>
                     )}
-                    <div onClick={() => openForm(dk, h)} style={{ flex: 1, fontSize: 14, lineHeight: 1.35, cursor: 'pointer', textDecoration: data.done ? 'line-through' : 'none', color: data.done ? theme.inkSoft : theme.ink }}>
+                    <div
+                      draggable
+                      onDragStart={(e) => e.dataTransfer.setData('text/plain', String(h))}
+                      onClick={() => openForm(dk, h)}
+                      style={{ flex: 1, fontSize: 14, lineHeight: 1.35, cursor: 'grab', textDecoration: data.done ? 'line-through' : 'none', color: data.done ? theme.inkSoft : theme.ink }}
+                    >
                       {data.text}
                     </div>
+                    {data.recurring && (
+                      <span title={`Repeats ${FREQUENCY_LABELS[data.frequency]}`} style={{ fontSize: 12, flexShrink: 0, opacity: 0.6 }}>🔁</span>
+                    )}
                     <button className="dp-slot-del" onClick={() => deleteSlot(dk, h)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.inkSoft, fontSize: 15, opacity: 0, transition: 'opacity .15s ease', flexShrink: 0 }}>✕</button>
                   </>
                 ) : (
@@ -881,7 +1413,7 @@ function DayPanel({ theme, dk, getSlot, openSlotForm, openForm, saveSlot, toggle
 }
 
 // ================= WEEK VIEW =================
-function WeekPanel({ theme, anchorDate, tasksByDate, bigTaskById, toggleDone, jumpToDay, today }) {
+function WeekPanel({ theme, anchorDate, getSlot, bigTaskById, toggleDone, jumpToDay, today }) {
   const start = startOfWeek(anchorDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
 
@@ -889,10 +1421,7 @@ function WeekPanel({ theme, anchorDate, tasksByDate, bigTaskById, toggleDone, ju
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 12 }}>
       {days.map((d) => {
         const dk = dateKey(d);
-        const slots = tasksByDate[dk] || {};
-        const entries = Object.entries(slots)
-          .filter(([, v]) => v)
-          .sort((a, b) => Number(a[0]) - Number(b[0]));
+        const entries = HOURS.map((h) => [h, getSlot(dk, h)]).filter(([, v]) => v);
         const isToday = isSameDay(d, today);
 
         return (
@@ -912,11 +1441,10 @@ function WeekPanel({ theme, anchorDate, tasksByDate, bigTaskById, toggleDone, ju
               {entries.length === 0 && (
                 <div style={{ fontSize: 11.5, color: theme.inkSoft, opacity: 0.7, marginTop: 4 }}>No tasks yet</div>
               )}
-              {entries.map(([hourStr, task]) => {
-                const hour = Number(hourStr);
+              {entries.map(([hour, task]) => {
                 const tag = task.bigTaskId ? bigTaskById(task.bigTaskId) : null;
                 return (
-                  <div key={hourStr} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                  <div key={hour} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                     <div
                       onClick={() => toggleDone(dk, hour)}
                       style={{ width: 12, height: 12, marginTop: 2, borderRadius: '50%', flexShrink: 0, cursor: 'pointer', background: task.done ? theme.accent : 'transparent', border: `1.5px solid ${task.done ? theme.accent : theme.inkSoft}` }}
@@ -936,6 +1464,7 @@ function WeekPanel({ theme, anchorDate, tasksByDate, bigTaskById, toggleDone, ju
                         }}
                         title={task.text}
                       >
+                        {task.recurring && <span style={{ opacity: 0.6, marginRight: 3 }}>🔁</span>}
                         {task.text}
                       </div>
                     </div>
@@ -955,7 +1484,7 @@ function WeekPanel({ theme, anchorDate, tasksByDate, bigTaskById, toggleDone, ju
 }
 
 // ================= MONTH VIEW =================
-function MonthPanel({ theme, anchorDate, tasksByDate, bigTaskById, jumpToDay, today }) {
+function MonthPanel({ theme, anchorDate, getSlot, bigTaskById, jumpToDay, today }) {
   const monthStart = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
   const monthEnd = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0);
   const gridStart = startOfWeek(monthStart);
@@ -978,8 +1507,7 @@ function MonthPanel({ theme, anchorDate, tasksByDate, bigTaskById, jumpToDay, to
           const dk = dateKey(d);
           const inMonth = d.getMonth() === anchorDate.getMonth();
           const isToday = isSameDay(d, today);
-          const slots = tasksByDate[dk] || {};
-          const filled = Object.values(slots).filter(Boolean);
+          const filled = HOURS.map((h) => getSlot(dk, h)).filter(Boolean);
           const doneCount = filled.filter((s) => s.done).length;
           const emojis = [...new Set(filled.map((s) => (s.bigTaskId ? bigTaskById(s.bigTaskId)?.emoji : null)).filter(Boolean))];
 
